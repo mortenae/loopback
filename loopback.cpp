@@ -1,3 +1,27 @@
+/*
+	The MIT License (MIT)
+
+	Copyright (c) 2013 Morten Erlandsen <animorten@gmail.com>
+
+	Permission is hereby granted, free of charge, to any person obtaining a copy
+	of this software and associated documentation files (the "Software"), to deal
+	in the Software without restriction, including without limitation the rights
+	to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+	copies of the Software, and to permit persons to whom the Software is
+	furnished to do so, subject to the following conditions:
+
+	The above copyright notice and this permission notice shall be included in
+	all copies or substantial portions of the Software.
+
+	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+	IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+	FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+	AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+	LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+	OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+	THE SOFTWARE.
+*/
+
 #include <stdio.h>
 #include <stdint.h>
 #include <time.h>
@@ -40,15 +64,8 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
-	if(FAILED(client->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_LOOPBACK, 0, 0, format, NULL))) {
+	if(FAILED(client->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, 1000000, 0, format, NULL))) {
 		fprintf(stderr, "Initializing audio client failed\n");
-		return 1;
-	}
-
-	HANDLE event = CreateEvent(NULL, FALSE, FALSE, NULL);
-
-	if(FAILED(client->SetEventHandle(event))) {
-		fprintf(stderr, "Setting event handle failed\n");
 		return 1;
 	}
 
@@ -59,17 +76,10 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
-	/*IAudioRenderClient* render;
-
-	if(FAILED(client->GetService(__uuidof(IAudioRenderClient), reinterpret_cast<void**>(&render)))) {
-		fprintf(stderr, "Getting render service failed\n");
-		return 1;
-	}*/
-
 	TCHAR filename[MAX_PATH];
 	TCHAR homepath[MAX_PATH];
 	GetEnvironmentVariable(TEXT("HOMEPATH"), homepath, sizeof(homepath));
-	StringCchPrintf(filename, sizeof(filename) / sizeof(TCHAR), TEXT("%s\\Desktop\\%u.wav"), homepath, time(NULL));
+	StringCchPrintf(filename, sizeof(filename) / sizeof(TCHAR), TEXT("%s\\%u.wav"), homepath, time(NULL));
 
 	HANDLE file = CreateFile(filename, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 
@@ -100,7 +110,6 @@ int main(int argc, char** argv) {
 
 	UINT32 position = 0;
 
-	//while(WaitForSingleObject(event, INFINITE) == WAIT_OBJECT_0) {
 	while(GetAsyncKeyState(VK_RCONTROL) >= 0) {
 		BYTE* data;
 		UINT32 size;
@@ -111,7 +120,10 @@ int main(int argc, char** argv) {
 
 		if(size > 0) {
 			capture->GetBuffer(&data, &size, &flags, &device, &performance);
-			if(flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) printf("GLITCH\n");
+
+			if(flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) {
+				printf("Buffer underrun detected\n");
+			}
 
 			for(UINT32 i = 0; i < size * format->nChannels; ++i, ++position) {
 				reinterpret_cast<short*>(&file_data[44])[position] = static_cast<short>(reinterpret_cast<float*>(data)[i] * 32767.0f);
@@ -141,15 +153,6 @@ int main(int argc, char** argv) {
 	reinterpret_cast<UINT32*>(file_data)[9] = 0x61746164;
 	reinterpret_cast<UINT32*>(file_data)[10] = position * sizeof(short);
 
-	/*reinterpret_cast<uint32_t*>(file_data)[0] = 0x46464952;
-	reinterpret_cast<uint32_t*>(file_data)[1] = 64 + position * sizeof(struct frame);
-	reinterpret_cast<uint32_t*>(file_data)[2] = 0x45564157;
-	reinterpret_cast<uint32_t*>(file_data)[3] = 0x20746d66;
-	reinterpret_cast<uint32_t*>(file_data)[4] = 40;
-	memcpy(&file_data[20], format, 40);
-	reinterpret_cast<uint32_t*>(file_data)[15] = 0x61746164;
-	reinterpret_cast<uint32_t*>(file_data)[16] = position * sizeof(struct frame);*/
-
 	UnmapViewOfFile(file_data);
 	CloseHandle(mapping);
 	SetFilePointer(file, 44 + position * sizeof(short), 0, FILE_BEGIN);
@@ -157,7 +160,6 @@ int main(int argc, char** argv) {
 	CloseHandle(file);
 
 	capture->Release();
-	CloseHandle(event);
 	CoTaskMemFree(format);
 	client->Release();
 	device->Release();
